@@ -175,14 +175,15 @@ jobs:
         run: npm test
         shell: bash
       - name: Verify addon filename matches loader expectation
-        run: node -e "
+        run: |
+          node -e "
           const fs = require('fs');
           const f = fs.readdirSync('.').find((n) => n.endsWith('.node'));
           if (!f) { console.error('no .node artifact'); process.exit(1); }
           const expect = 'smart-archive-rar.${{ matrix.settings.triple }}.node';
           if (f !== expect) { console.error('expected', expect, 'got', f); process.exit(1); }
           console.log('ok:', f);
-        "
+          "
         shell: bash
   release-prep:
     name: Prepare npm packages (manual publish)
