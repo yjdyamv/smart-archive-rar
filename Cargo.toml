@@ -11,7 +11,7 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = "3"
 napi-derive = "3"
-rar5 = { git = "https://codeberg.org/yjdyamv/rar-rs.git", rev = "b8493303c0ffd0e20f619a6036c8780daa042775" }
+rar5 = { git = "https://codeberg.org/yjdyamv/rar-rs.git", rev = "341bd79e946b774183e982cbb3195a8752c89ecb" }
 
 [build-dependencies]
 napi-build = "2"
