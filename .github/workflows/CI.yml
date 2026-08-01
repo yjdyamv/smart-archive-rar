@@ -141,21 +141,27 @@ jobs:
           - host: windows-latest
             target: x86_64-pc-windows-msvc
             triple: win32-x64-msvc
-          - host: windows-latest
+            architecture: x64
+          - host: windows-11-arm
             target: aarch64-pc-windows-msvc
             triple: win32-arm64-msvc
+            architecture: arm64
           - host: macos-latest
             target: x86_64-apple-darwin
             triple: darwin-x64
+            architecture: x64
           - host: macos-latest
             target: aarch64-apple-darwin
             triple: darwin-arm64
+            architecture: arm64
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             triple: linux-x64-gnu
-          - host: ubuntu-latest
+            architecture: x64
+          - host: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             triple: linux-arm64-gnu
+            architecture: arm64
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v7
@@ -163,6 +169,7 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 24
+          architecture: ${{ matrix.settings.architecture }}
           cache: npm
       - name: Install dependencies
         run: npm ci
@@ -171,8 +178,8 @@ jobs:
         with:
           name: bindings-${{ matrix.settings.target }}
           path: .
-      - name: Verify addon loads and passes tests
-        run: npm test
+      - name: List files
+        run: ls -la
         shell: bash
       - name: Verify addon filename matches loader expectation
         run: |
@@ -184,6 +191,9 @@ jobs:
           if (f !== expect) { console.error('expected', expect, 'got', f); process.exit(1); }
           console.log('ok:', f);
           "
+        shell: bash
+      - name: Test addon
+        run: npm test
         shell: bash
   release-prep:
     name: Prepare npm packages (manual publish)
