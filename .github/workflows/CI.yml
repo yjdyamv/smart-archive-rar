@@ -106,11 +106,13 @@ jobs:
             .cargo-cache
             target/
           key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
-      - name: Setup zig
-        uses: mlugg/setup-zig@v2
+      - name: Install zig (musl cross builds)
         if: ${{ contains(matrix.settings.target, 'musl') }}
-        with:
-          version: 0.14.1
+        run: |
+          curl -sL https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz -o zig.tar.xz
+          tar xf zig.tar.xz
+          echo "$PWD/zig-x86_64-linux-0.14.1" >> "$GITHUB_PATH"
+        shell: bash
       - name: Install cargo-zigbuild
         uses: taiki-e/install-action@v2
         if: ${{ contains(matrix.settings.target, 'musl') }}
