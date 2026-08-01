@@ -8,8 +8,8 @@ env:
   push:
     branches:
       - main
-    tags-ignore:
-      - '**'
+    tags:
+      - 'v*'
     paths-ignore:
       - '**/*.md'
       - LICENSE
@@ -239,3 +239,70 @@ jobs:
             *.node
             index.js
             index.d.ts
+  publish:
+    name: Publish to npm (${{ github.ref_name }})
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - lint
+      - build
+      - test-bindings
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify tag matches package.json version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "::error::tag v$TAG does not match package.json version $VERSION"
+            exit 1
+          fi
+          echo "releasing v$VERSION"
+        shell: bash
+      - name: Check NPM_TOKEN
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error::NPM_TOKEN secret is missing — add it under repo Settings → Secrets → Actions"
+            exit 1
+          fi
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
+      - name: Pre-publish (create npm dirs + root optionalDependencies)
+        run: npx napi pre-publish -t npm
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+      - name: Move artifacts into npm dirs
+        run: npx napi artifacts
+      - name: List packages
+        run: ls -R ./npm
+        shell: bash
+      - name: Publish
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          DIST_TAG=latest
+          if [[ "$TAG_NAME" == *-* ]]; then DIST_TAG=next; fi
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          npm config set provenance true
+          for dir in npm/*/; do
+            echo "publishing ${dir}"
+            (cd "$dir" && npm publish --access public --tag "$DIST_TAG")
+          done
+          echo "publishing root package"
+          npm publish --access public --tag "$DIST_TAG"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
