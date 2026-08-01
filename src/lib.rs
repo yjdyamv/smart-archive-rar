@@ -267,11 +267,13 @@ impl Task for CreateArchiveTask {
     };
 
     if let Some(tsfn) = self.progress.take() {
+      let tsfn = Arc::new(tsfn);
+      let cb_tsfn = tsfn.clone();
       let processed = Arc::new(AtomicU64::new(0));
       let emit = processed.clone();
       archive.set_progress_callback(Some(Box::new(move |done, _file_total| {
         let overall = emit.load(Ordering::Relaxed) + done;
-        let _ = tsfn.call(
+        let _ = cb_tsfn.call(
           Ok(ProgressData {
             done: overall as f64,
             total: total_bytes as f64,
@@ -284,6 +286,15 @@ impl Task for CreateArchiveTask {
         archive_add(&mut archive, e, level)?;
         processed.fetch_add(size, Ordering::Relaxed);
       }
+      // Guarantee the terminal 100% event. Delivery is asynchronous, so the
+      // JS side may still observe it a tick after the promise resolves.
+      let _ = tsfn.call(
+        Ok(ProgressData {
+          done: total_bytes as f64,
+          total: total_bytes as f64,
+        }),
+        ThreadsafeFunctionCallMode::Blocking,
+      );
     } else {
       for e in &planned {
         archive_add(&mut archive, e, level)?;

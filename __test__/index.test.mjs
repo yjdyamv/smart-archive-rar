@@ -55,6 +55,9 @@ test('reports progress from 0 to 100%', async () => {
       },
       (_err, p) => events.push(p.done / p.total),
     )
+    // Progress callbacks are delivered on the event loop; the last one can
+    // arrive a tick after the promise resolves.
+    await new Promise((resolve) => setTimeout(resolve, 50))
     assert.ok(events.length > 0, 'no progress events')
     assert.equal(events.at(-1), 1)
     for (const [a, b] of events.slice(1).map((v, i) => [events[i], v])) {
