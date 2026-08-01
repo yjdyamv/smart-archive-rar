@@ -330,8 +330,13 @@ fn archive_add(archive: &mut rar5::RarArchive, e: &PlannedEntry, level: u8) -> R
       }
     }
     "dir" => {
+      // Directory entry only — callers that apply exclusion filtering
+      // enumerate children themselves and add them as "file" entries, so
+      // recursion here would bypass their filters.
       let path = e.path.as_ref().expect("dir path");
-      archive.add_as(path, &e.name, level).map_err(to_napi_error)
+      archive
+        .add_directory_only(path, &e.name)
+        .map_err(to_napi_error)
     }
     "bytes" => {
       let data = e.data.as_ref().expect("bytes data");
