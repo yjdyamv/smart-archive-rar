@@ -411,7 +411,7 @@ dependencies = [
 [[package]]
 name = "rar5"
 version = "0.1.0"
-source = "git+https://codeberg.org/yjdyamv/rar-rs.git?rev=2886ae2c5debdb9684b8f164d63b132bd74b3d37#2886ae2c5debdb9684b8f164d63b132bd74b3d37"
+source = "git+https://codeberg.org/yjdyamv/rar-rs.git?rev=ec2dca9a592adb055c382571423601d56f8b6730#ec2dca9a592adb055c382571423601d56f8b6730"
 dependencies = [
  "aes",
  "cbc",
@@ -453,7 +453,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "smart-archive-rar"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "napi",
  "napi-build",
