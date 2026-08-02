@@ -40,6 +40,9 @@ pub struct CreateArchiveOptions {
   pub level: Option<u32>,
   /// Optional AES-256 password (file-level encryption).
   pub password: Option<String>,
+  /// Also encrypt the archive structure (file names) — RAR5 header
+  /// encryption. Requires `password`; incompatible with multi-volume.
+  pub encrypt_headers: Option<bool>,
   /// Volume size in bytes; when set, produces multi-volume archives
   /// (`name.part1.rar`, ...).
   pub volume_size: Option<i64>,
@@ -261,7 +264,11 @@ impl Task for CreateArchiveTask {
     let mut archive = if let Some(size) = self.opts.volume_size {
       rar5::RarArchive::create_multivolume(out, size as u64).map_err(to_napi_error)?
     } else if let Some(pw) = self.opts.password.as_deref() {
-      rar5::RarArchive::create_with_password(out, pw).map_err(to_napi_error)?
+      if self.opts.encrypt_headers.unwrap_or(false) {
+        rar5::RarArchive::create_with_password_headers(out, pw).map_err(to_napi_error)?
+      } else {
+        rar5::RarArchive::create_with_password(out, pw).map_err(to_napi_error)?
+      }
     } else {
       rar5::RarArchive::create(out).map_err(to_napi_error)?
     };

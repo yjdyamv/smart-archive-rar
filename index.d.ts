@@ -11,6 +11,11 @@ export interface CreateArchiveOptions {
   /** Optional AES-256 password (file-level encryption). */
   password?: string
   /**
+   * Also encrypt the archive structure (file names) — RAR5 header
+   * encryption. Requires `password`; incompatible with multi-volume.
+   */
+  encryptHeaders?: boolean
+  /**
    * Volume size in bytes; when set, produces multi-volume archives
    * (`name.part1.rar`, ...).
    */
