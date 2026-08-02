@@ -272,7 +272,7 @@ impl Task for CreateArchiveTask {
     let rev_pct = self.opts.recovery_volumes_percent.unwrap_or(0).min(100);
     let mut archive = if let Some(size) = self.opts.volume_size {
       if rev_pct > 0 {
-        rar5::RarArchive::create_multivolume_with_recovery(out, size as u64, rev_pct as u8)
+        rar5::RarArchive::create_multivolume_with_recovery(out, size as u64, rev_pct)
           .map_err(to_napi_error)?
       } else {
         rar5::RarArchive::create_multivolume(out, size as u64).map_err(to_napi_error)?
