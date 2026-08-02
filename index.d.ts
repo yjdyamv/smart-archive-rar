@@ -21,6 +21,11 @@ export interface CreateArchiveOptions {
    */
   recoveryPercent?: number
   /**
+   * Create `.rev` recovery volumes protecting this percent (0-100) of the
+   * volume count (WinRAR `-rv`). Requires `volume_size`.
+   */
+  recoveryVolumesPercent?: number
+  /**
    * Volume size in bytes; when set, produces multi-volume archives
    * (`name.part1.rar`, ...).
    */

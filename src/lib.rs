@@ -46,6 +46,9 @@ pub struct CreateArchiveOptions {
   /// Add a WinRAR-compatible inline recovery record protecting this percent
   /// (0-100) of the archive. Incompatible with multi-volume.
   pub recovery_percent: Option<u8>,
+  /// Create `.rev` recovery volumes protecting this percent (0-100) of the
+  /// volume count (WinRAR `-rv`). Requires `volume_size`.
+  pub recovery_volumes_percent: Option<u8>,
   /// Volume size in bytes; when set, produces multi-volume archives
   /// (`name.part1.rar`, ...).
   pub volume_size: Option<i64>,
@@ -266,8 +269,14 @@ impl Task for CreateArchiveTask {
 
     let rec = self.opts.recovery_percent.unwrap_or(0).min(100);
     let rec = if rec == 0 { None } else { Some(rec) };
+    let rev_pct = self.opts.recovery_volumes_percent.unwrap_or(0).min(100);
     let mut archive = if let Some(size) = self.opts.volume_size {
-      rar5::RarArchive::create_multivolume(out, size as u64).map_err(to_napi_error)?
+      if rev_pct > 0 {
+        rar5::RarArchive::create_multivolume_with_recovery(out, size as u64, rev_pct as u8)
+          .map_err(to_napi_error)?
+      } else {
+        rar5::RarArchive::create_multivolume(out, size as u64).map_err(to_napi_error)?
+      }
     } else if let Some(pw) = self.opts.password.as_deref() {
       match (self.opts.encrypt_headers.unwrap_or(false), rec) {
         (true, Some(pct)) => rar5::RarArchive::create_with_password_headers_recovery(out, pw, pct)

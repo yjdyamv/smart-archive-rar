@@ -411,7 +411,7 @@ dependencies = [
 [[package]]
 name = "rar5"
 version = "0.1.0"
-source = "git+https://codeberg.org/yjdyamv/rar-rs.git?rev=19a0ec30fb79afc414b9f1320c06c3627d32b1de#19a0ec30fb79afc414b9f1320c06c3627d32b1de"
+source = "git+https://codeberg.org/yjdyamv/rar-rs.git?rev=aad00f0557dc35f75d87ef5e8bad15106683964b#aad00f0557dc35f75d87ef5e8bad15106683964b"
 dependencies = [
  "aes",
  "cbc",
