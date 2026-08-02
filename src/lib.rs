@@ -270,19 +270,15 @@ impl Task for CreateArchiveTask {
       rar5::RarArchive::create_multivolume(out, size as u64).map_err(to_napi_error)?
     } else if let Some(pw) = self.opts.password.as_deref() {
       match (self.opts.encrypt_headers.unwrap_or(false), rec) {
-        (true, Some(pct)) => rar5::RarArchive::create_with_password_headers_recovery(
-          out, pw, pct,
-        )
-        .map_err(to_napi_error)?,
+        (true, Some(pct)) => rar5::RarArchive::create_with_password_headers_recovery(out, pw, pct)
+          .map_err(to_napi_error)?,
         (true, None) => {
           rar5::RarArchive::create_with_password_headers(out, pw).map_err(to_napi_error)?
         }
         (false, Some(pct)) => {
           rar5::RarArchive::create_with_password_recovery(out, pw, pct).map_err(to_napi_error)?
         }
-        (false, None) => {
-          rar5::RarArchive::create_with_password(out, pw).map_err(to_napi_error)?
-        }
+        (false, None) => rar5::RarArchive::create_with_password(out, pw).map_err(to_napi_error)?,
       }
     } else if let Some(pct) = rec {
       rar5::RarArchive::create_with_recovery(out, pct).map_err(to_napi_error)?
@@ -343,24 +339,27 @@ impl Task for CreateArchiveTask {
   }
 }
 
-
 /// Repair a damaged RAR5 archive using its inline recovery record.
 ///
 /// Reads `input_path`, rebuilds any damaged data shards from the `{RB}`
 /// parity shards and writes the repaired archive to `output_path`.
 #[napi]
 pub fn repair_archive(input_path: String, output_path: String) -> Result<()> {
-    let input = fs::read(&input_path).map_err(|err| {
-        Error::new(Status::GenericFailure, format!("read {}: {err}", input_path))
-    })?;
-    let repaired =
-        rar5::recovery::rar5::repair_inline_recovery_archive(&input).map_err(|err| {
-            Error::new(Status::GenericFailure, format!("repair failed: {err}"))
-        })?;
-    fs::write(&output_path, &repaired).map_err(|err| {
-        Error::new(Status::GenericFailure, format!("write {}: {err}", output_path))
-    })?;
-    Ok(())
+  let input = fs::read(&input_path).map_err(|err| {
+    Error::new(
+      Status::GenericFailure,
+      format!("read {}: {err}", input_path),
+    )
+  })?;
+  let repaired = rar5::recovery::rar5::repair_inline_recovery_archive(&input)
+    .map_err(|err| Error::new(Status::GenericFailure, format!("repair failed: {err}")))?;
+  fs::write(&output_path, &repaired).map_err(|err| {
+    Error::new(
+      Status::GenericFailure,
+      format!("write {}: {err}", output_path),
+    )
+  })?;
+  Ok(())
 }
 
 fn archive_add(archive: &mut rar5::RarArchive, e: &PlannedEntry, level: u8) -> Result<()> {
