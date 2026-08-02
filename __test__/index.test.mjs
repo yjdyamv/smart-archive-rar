@@ -8,6 +8,46 @@ import { createArchive } from '../index.js'
 
 const RAR5_SIG = Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x01, 0x00])
 
+// Regression fixture from rar-rs tests/fixtures/tail-match-362.bin: a 362-byte
+// JSON file whose final two bytes match an earlier position at a cached
+// distance. The rar5 prefilter used to read past the end of the buffer here
+// and abort the whole process (SIGABRT), killing the VS Code extension host.
+const TAIL_MATCH_FIXTURE = Buffer.from(`{
+  "rules": {
+    "no-control-regex": "off",
+    "new-cap": "off",
+    "no-underscore-dangle": "off",
+    "unicorn/require-post-message-target-origin": "off",
+    "unicorn/no-array-sort": "off"
+  },
+  "overrides": [
+    {
+      "files": ["media/**/*.js"],
+      "rules": {
+        "no-unused-vars": "off",
+        "no-useless-escape": "off"
+      }
+    }
+  ]
+}
+`)
+
+test('regression: tail-match fixture compresses without aborting', async () => {
+  const dir = tempDir()
+  try {
+    const out = join(dir, 'tail.rar')
+    const res = await createArchive({
+      outPath: out,
+      level: 3,
+      entries: [{ kind: 'bytes', name: 'tail.json', data: TAIL_MATCH_FIXTURE }],
+    })
+    assert.deepEqual(res.files, [out])
+    assert.equal(TAIL_MATCH_FIXTURE.length, 362)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 function tempDir() {
   return mkdtempSync(join(tmpdir(), 'sar-test-'))
 }
