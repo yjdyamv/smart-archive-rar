@@ -16,6 +16,11 @@ export interface CreateArchiveOptions {
    */
   encryptHeaders?: boolean
   /**
+   * Add a WinRAR-compatible inline recovery record protecting this percent
+   * (0-100) of the archive. Incompatible with multi-volume.
+   */
+  recoveryPercent?: number
+  /**
    * Volume size in bytes; when set, produces multi-volume archives
    * (`name.part1.rar`, ...).
    */
@@ -47,3 +52,11 @@ export interface ProgressData {
   done: number
   total: number
 }
+
+/**
+ * Repair a damaged RAR5 archive using its inline recovery record.
+ *
+ * Reads `input_path`, rebuilds any damaged data shards from the `{RB}`
+ * parity shards and writes the repaired archive to `output_path`.
+ */
+export declare function repairArchive(inputPath: string, outputPath: string): void

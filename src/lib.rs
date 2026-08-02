@@ -43,6 +43,9 @@ pub struct CreateArchiveOptions {
   /// Also encrypt the archive structure (file names) — RAR5 header
   /// encryption. Requires `password`; incompatible with multi-volume.
   pub encrypt_headers: Option<bool>,
+  /// Add a WinRAR-compatible inline recovery record protecting this percent
+  /// (0-100) of the archive. Incompatible with multi-volume.
+  pub recovery_percent: Option<u8>,
   /// Volume size in bytes; when set, produces multi-volume archives
   /// (`name.part1.rar`, ...).
   pub volume_size: Option<i64>,
@@ -261,14 +264,28 @@ impl Task for CreateArchiveTask {
         .map_err(|err| Error::new(Status::GenericFailure, format!("mkdir: {err}")))?;
     }
 
+    let rec = self.opts.recovery_percent.unwrap_or(0).min(100);
+    let rec = if rec == 0 { None } else { Some(rec) };
     let mut archive = if let Some(size) = self.opts.volume_size {
       rar5::RarArchive::create_multivolume(out, size as u64).map_err(to_napi_error)?
     } else if let Some(pw) = self.opts.password.as_deref() {
-      if self.opts.encrypt_headers.unwrap_or(false) {
-        rar5::RarArchive::create_with_password_headers(out, pw).map_err(to_napi_error)?
-      } else {
-        rar5::RarArchive::create_with_password(out, pw).map_err(to_napi_error)?
+      match (self.opts.encrypt_headers.unwrap_or(false), rec) {
+        (true, Some(pct)) => rar5::RarArchive::create_with_password_headers_recovery(
+          out, pw, pct,
+        )
+        .map_err(to_napi_error)?,
+        (true, None) => {
+          rar5::RarArchive::create_with_password_headers(out, pw).map_err(to_napi_error)?
+        }
+        (false, Some(pct)) => {
+          rar5::RarArchive::create_with_password_recovery(out, pw, pct).map_err(to_napi_error)?
+        }
+        (false, None) => {
+          rar5::RarArchive::create_with_password(out, pw).map_err(to_napi_error)?
+        }
       }
+    } else if let Some(pct) = rec {
+      rar5::RarArchive::create_with_recovery(out, pct).map_err(to_napi_error)?
     } else {
       rar5::RarArchive::create(out).map_err(to_napi_error)?
     };
@@ -324,6 +341,26 @@ impl Task for CreateArchiveTask {
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
     Ok(output)
   }
+}
+
+
+/// Repair a damaged RAR5 archive using its inline recovery record.
+///
+/// Reads `input_path`, rebuilds any damaged data shards from the `{RB}`
+/// parity shards and writes the repaired archive to `output_path`.
+#[napi]
+pub fn repair_archive(input_path: String, output_path: String) -> Result<()> {
+    let input = fs::read(&input_path).map_err(|err| {
+        Error::new(Status::GenericFailure, format!("read {}: {err}", input_path))
+    })?;
+    let repaired =
+        rar5::recovery::rar5::repair_inline_recovery_archive(&input).map_err(|err| {
+            Error::new(Status::GenericFailure, format!("repair failed: {err}"))
+        })?;
+    fs::write(&output_path, &repaired).map_err(|err| {
+        Error::new(Status::GenericFailure, format!("write {}: {err}", output_path))
+    })?;
+    Ok(())
 }
 
 fn archive_add(archive: &mut rar5::RarArchive, e: &PlannedEntry, level: u8) -> Result<()> {
