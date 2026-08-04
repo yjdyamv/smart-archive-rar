@@ -299,7 +299,6 @@ impl Task for CreateArchiveTask {
     let rec = self.opts.recovery_percent.unwrap_or(0).min(100);
     let rec = if rec == 0 { None } else { Some(rec) };
     let rev_count = self.opts.recovery_volume_count.unwrap_or(0);
-    eprintln!("[dbg] rev_count={} volume_size={:?}", rev_count, self.opts.volume_size);
     let mut archive = if let Some(size) = self.opts.volume_size {
       if rev_count > 0 {
         rar5::RarArchive::create_multivolume_with_recovery_count(out, size as u64, rev_count)
