@@ -436,7 +436,7 @@ checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
 [[package]]
 name = "rar5"
 version = "0.1.0"
-source = "git+https://codeberg.org/yjdyamv/rar-rs.git?rev=754d0a4db84d8bc9996830a0c3cefe9e60e3c43c#754d0a4db84d8bc9996830a0c3cefe9e60e3c43c"
+source = "git+https://codeberg.org/yjdyamv/rar-rs.git?rev=efff1bfb6a10476a7077ca4d2b75d00c6c0687a3#efff1bfb6a10476a7077ca4d2b75d00c6c0687a3"
 dependencies = [
  "aes",
  "crc32fast",
