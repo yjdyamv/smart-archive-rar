@@ -185,36 +185,12 @@ fn entry_size(e: &PlannedEntry) -> Result<u64> {
       })?;
       Ok(meta.len())
     }
-    "dir" => dir_size(e.path.as_ref().expect("dir path")),
+    // Directory entries write only a header — their children arrive as
+    // explicit file entries, so counting the tree again would double-count
+    // the progress denominator (and the 32 GiB budget).
+    "dir" => Ok(0),
     _ => Ok(0),
   }
-}
-
-fn dir_size(path: &Path) -> Result<u64> {
-  let mut total = 0u64;
-  let mut stack = vec![path.to_path_buf()];
-  while let Some(dir) = stack.pop() {
-    for entry in fs::read_dir(&dir).map_err(|err| {
-      Error::new(
-        Status::GenericFailure,
-        format!("read_dir {}: {err}", dir.display()),
-      )
-    })? {
-      let entry = entry.map_err(|err| {
-        Error::new(
-          Status::GenericFailure,
-          format!("read_dir {}: {err}", dir.display()),
-        )
-      })?;
-      let p = entry.path();
-      if p.is_dir() {
-        stack.push(p);
-      } else if let Ok(meta) = p.metadata() {
-        total += meta.len();
-      }
-    }
-  }
-  Ok(total)
 }
 
 fn basename(path: &Path) -> String {
@@ -328,24 +304,43 @@ impl Task for CreateArchiveTask {
       rar5::RarArchive::create(out).map_err(to_napi_error)?
     };
 
-    if let Some(tsfn) = self.progress.take() {
-      let tsfn = Arc::new(tsfn);
+    let terminal = self.progress.take().map(Arc::new);
+    if let Some(tsfn) = terminal.as_ref() {
       let cb_tsfn = tsfn.clone();
       let emitted = Arc::new(AtomicU64::new(0));
       let emit = emitted.clone();
+      let last_done = Arc::new(AtomicU64::new(0));
+      let last = last_done.clone();
       archive.set_progress_callback(Some(Box::new(move |done, _file_total| {
-        let overall = emit.fetch_add(done, Ordering::Relaxed) + done;
+        if done == 0 {
+          // rar-rs starts every member with a (0, file_total) event; reset
+          // the per-file baseline so only the delta is accumulated.
+          last.store(0, Ordering::Relaxed);
+        }
+        let prev = last.swap(done, Ordering::Relaxed);
+        let delta = done.saturating_sub(prev);
+        let overall = emit.fetch_add(delta, Ordering::Relaxed) + delta;
         let _ = cb_tsfn.call(
           Ok(ProgressData {
-            done: overall as f64,
+            done: overall.min(total_bytes) as f64,
             total: total_bytes as f64,
           }),
           ThreadsafeFunctionCallMode::NonBlocking,
         );
       })));
       archive.add_batch(&batch).map_err(to_napi_error)?;
-      // Guarantee the terminal 100% event. Delivery is asynchronous, so the
-      // JS side may still observe it a tick after the promise resolves.
+    } else {
+      archive.add_batch(&batch).map_err(to_napi_error)?;
+    }
+
+    archive.close().map_err(to_napi_error)?;
+    drop(archive);
+
+    if let Some(tsfn) = terminal {
+      // Terminal 100% event after the archive is fully closed (including
+      // recovery records and volume finalization). Delivery is asynchronous,
+      // so the JS side may still observe it a tick after the promise
+      // resolves.
       let _ = tsfn.call(
         Ok(ProgressData {
           done: total_bytes as f64,
@@ -353,12 +348,7 @@ impl Task for CreateArchiveTask {
         }),
         ThreadsafeFunctionCallMode::Blocking,
       );
-    } else {
-      archive.add_batch(&batch).map_err(to_napi_error)?;
     }
-
-    archive.close().map_err(to_napi_error)?;
-    drop(archive);
 
     let mut files = rar5::discover_volumes(out)
       .into_iter()

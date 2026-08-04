@@ -2,7 +2,16 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createReadStream } from 'node:fs'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import {
+  mkdtempSync,
+  writeFileSync,
+  rmSync,
+  readdirSync,
+  mkdirSync,
+  openSync,
+  writeSync,
+  closeSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createArchive } from '../index.js'
@@ -104,6 +113,81 @@ test('reports progress from 0 to 100%', async () => {
     for (const [a, b] of events.slice(1).map((v, i) => [events[i], v])) {
       assert.ok(a <= b, 'progress went backwards')
     }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('reports folder progress without double-counting directory trees', async () => {
+  const dir = tempDir()
+  try {
+    const src = join(dir, 'src')
+    mkdirSync(src)
+    // 24 small members -> parallel wave path; the plugin passes the folder
+    // itself as a dir entry plus every child as an explicit file entry.
+    for (let i = 0; i < 24; i++) {
+      writeFileSync(join(src, `small-${i}.bin`), Buffer.alloc(256 * 1024, i % 251))
+    }
+    const entries = [
+      { kind: 'dir', path: src, name: 'src' },
+      ...readdirSync(src).map((f) => ({
+        kind: 'file',
+        path: join(src, f),
+        name: `src/${f}`,
+      })),
+    ]
+    const events = []
+    const out = join(dir, 'out.rar')
+    await createArchive(
+      { outPath: out, entries, level: 3 },
+      (_err, p) => events.push(p.done / p.total),
+    )
+    // Progress callbacks are delivered on the event loop; the last one can
+    // arrive a tick after the promise resolves.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    assert.ok(events.length > 0, 'no progress events')
+    for (const [a, b] of events.slice(1).map((v, i) => [events[i], v])) {
+      assert.ok(a <= b, 'progress went backwards')
+    }
+    assert.ok(events.at(-1) >= 0.99, 'must end at 100%')
+    // Regression: the dir tree used to be counted again in `total`, so the
+    // per-member reports stalled around 50% until the terminal event.
+    assert.ok(
+      events.at(-2) >= 0.9,
+      `progress stalled mid-way: second-to-last ratio=${events.at(-2)}`,
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('never reports done > total for a >64MiB sequential file', async () => {
+  const dir = tempDir()
+  try {
+    const big = join(dir, 'big.bin')
+    const chunk = Buffer.alloc(4 * 1024 * 1024, 7)
+    const fd = openSync(big, 'w')
+    for (let i = 0; i < 17; i++) writeSync(fd, chunk)
+    closeSync(fd)
+
+    const events = []
+    const out = join(dir, 'out.rar')
+    await createArchive(
+      {
+        outPath: out,
+        level: 3,
+        entries: [{ kind: 'file', path: big, name: 'big.bin' }],
+      },
+      (_err, p) => events.push(p.done / p.total),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    assert.ok(events.length > 1, 'expected multiple progress events')
+    for (const ratio of events) {
+      assert.ok(ratio <= 1, `done exceeded total: ${ratio}`)
+    }
+    assert.ok(events.at(-1) >= 0.99, 'must end at 100%')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
