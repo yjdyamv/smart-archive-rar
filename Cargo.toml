@@ -1,6 +1,6 @@
 [package]
 name = "smart-archive-rar"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 description = "RAR5 archive creation for Smart Archive — napi-rs binding around the rar5 library"
 license = "BSD-2-Clause"
@@ -11,7 +11,7 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = "3"
 napi-derive = "3"
-rar5 = { git = "https://codeberg.org/yjdyamv/rar-rs.git", rev = "fca7b37c41fc5097ad0fb8980dee71ac5754dbb2", features = ["parallel", "simd"] }
+rar5 = { git = "https://codeberg.org/yjdyamv/rar-rs.git", rev = "beb28f11a86dd3e52ada403d477026039292e9c0", features = ["parallel", "simd"] }
 
 [build-dependencies]
 napi-build = "2"
