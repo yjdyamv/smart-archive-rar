@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { createReadStream } from 'node:fs'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -121,6 +122,37 @@ test('creates multi-volume archives', async () => {
     assert.ok(res.files.length >= 3, `expected >=3 volumes, got ${res.files.length}`)
     for (const f of res.files) {
       assert.equal((await readFileHead(f)).subarray(0, 7).toString(), 'Rar!\x1a\x07\x01')
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('creates archives via parallel batch with mixed entries', async () => {
+  const dir = tempDir()
+  try {
+    writeFileSync(join(dir, 'disk.bin'), Buffer.alloc(300_000, 5))
+    const out = join(dir, 'batch.rar')
+    const res = await createArchive({
+      outPath: out,
+      level: 3,
+      entries: [
+        { kind: 'dir', path: dir, name: 'folder' },
+        { kind: 'bytes', name: 'a.bin', data: Buffer.alloc(200_000, 1) },
+        { kind: 'file', path: join(dir, 'disk.bin'), name: 'docs/disk.bin' },
+        { kind: 'bytes', name: 'b.bin', data: Buffer.alloc(150_000, 2) },
+      ],
+    })
+    assert.deepEqual(res.files, [out])
+    const head = await readFileHead(out)
+    assert.deepEqual(head, RAR5_SIG)
+    // Official UNRAR validates the batch-produced archive when available.
+    const unrar = process.env.SA_OFFICIAL_UNRAR || '/home/yuan/下载/rar/unrar'
+    try {
+      execFileSync(unrar, ['t', out], { stdio: 'pipe' })
+    } catch (err) {
+      if (err.code === 'ENOENT') return // unrar not installed: skip validation
+      throw err
     }
   } finally {
     rmSync(dir, { recursive: true, force: true })

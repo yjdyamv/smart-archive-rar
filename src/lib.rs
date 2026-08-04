@@ -261,6 +261,35 @@ impl Task for CreateArchiveTask {
     }
 
     let level = self.opts.level.unwrap_or(3).min(5) as u8;
+    let mut batch: Vec<rar5::BatchEntry<'_>> = Vec::with_capacity(planned.len());
+    for e in &planned {
+      match e.kind.as_str() {
+        "file" => {
+          let path = e.path.as_ref().expect("file path");
+          batch.push(rar5::BatchEntry::File {
+            path,
+            name: if e.name.is_empty() { None } else { Some(&e.name) },
+            level,
+          });
+        }
+        "dir" => {
+          let path = e.path.as_ref().expect("dir path");
+          batch.push(rar5::BatchEntry::Directory {
+            path,
+            name: Some(&e.name),
+          });
+        }
+        "bytes" => {
+          let data = e.data.as_ref().expect("bytes data");
+          batch.push(rar5::BatchEntry::Bytes {
+            name: &e.name,
+            data,
+            level,
+          });
+        }
+        _ => {}
+      }
+    }
     let out = Path::new(&self.opts.out_path);
     if let Some(parent) = out.parent() {
       fs::create_dir_all(parent)
@@ -270,6 +299,7 @@ impl Task for CreateArchiveTask {
     let rec = self.opts.recovery_percent.unwrap_or(0).min(100);
     let rec = if rec == 0 { None } else { Some(rec) };
     let rev_count = self.opts.recovery_volume_count.unwrap_or(0);
+    eprintln!("[dbg] rev_count={} volume_size={:?}", rev_count, self.opts.volume_size);
     let mut archive = if let Some(size) = self.opts.volume_size {
       if rev_count > 0 {
         rar5::RarArchive::create_multivolume_with_recovery_count(out, size as u64, rev_count)
@@ -298,10 +328,10 @@ impl Task for CreateArchiveTask {
     if let Some(tsfn) = self.progress.take() {
       let tsfn = Arc::new(tsfn);
       let cb_tsfn = tsfn.clone();
-      let processed = Arc::new(AtomicU64::new(0));
-      let emit = processed.clone();
+      let emitted = Arc::new(AtomicU64::new(0));
+      let emit = emitted.clone();
       archive.set_progress_callback(Some(Box::new(move |done, _file_total| {
-        let overall = emit.load(Ordering::Relaxed) + done;
+        let overall = emit.fetch_add(done, Ordering::Relaxed) + done;
         let _ = cb_tsfn.call(
           Ok(ProgressData {
             done: overall as f64,
@@ -310,11 +340,7 @@ impl Task for CreateArchiveTask {
           ThreadsafeFunctionCallMode::NonBlocking,
         );
       })));
-      for e in &planned {
-        let size = entry_size(e)?;
-        archive_add(&mut archive, e, level)?;
-        processed.fetch_add(size, Ordering::Relaxed);
-      }
+      archive.add_batch(&batch).map_err(to_napi_error)?;
       // Guarantee the terminal 100% event. Delivery is asynchronous, so the
       // JS side may still observe it a tick after the promise resolves.
       let _ = tsfn.call(
@@ -325,9 +351,7 @@ impl Task for CreateArchiveTask {
         ThreadsafeFunctionCallMode::Blocking,
       );
     } else {
-      for e in &planned {
-        archive_add(&mut archive, e, level)?;
-      }
+      archive.add_batch(&batch).map_err(to_napi_error)?;
     }
 
     archive.close().map_err(to_napi_error)?;
@@ -369,35 +393,6 @@ pub fn repair_archive(input_path: String, output_path: String) -> Result<()> {
     )
   })?;
   Ok(())
-}
-
-fn archive_add(archive: &mut rar5::RarArchive, e: &PlannedEntry, level: u8) -> Result<()> {
-  match e.kind.as_str() {
-    "file" => {
-      let path = e.path.as_ref().expect("file path");
-      if e.name.is_empty() {
-        archive.add(path, level).map_err(to_napi_error)
-      } else {
-        archive.add_as(path, &e.name, level).map_err(to_napi_error)
-      }
-    }
-    "dir" => {
-      // Directory entry only — callers that apply exclusion filtering
-      // enumerate children themselves and add them as "file" entries, so
-      // recursion here would bypass their filters.
-      let path = e.path.as_ref().expect("dir path");
-      archive
-        .add_directory_only(path, &e.name)
-        .map_err(to_napi_error)
-    }
-    "bytes" => {
-      let data = e.data.as_ref().expect("bytes data");
-      archive
-        .add_bytes(&e.name, data, level)
-        .map_err(to_napi_error)
-    }
-    _ => Ok(()),
-  }
 }
 
 /// Create a RAR5 archive from the given entries.
