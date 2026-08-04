@@ -268,7 +268,11 @@ impl Task for CreateArchiveTask {
           let path = e.path.as_ref().expect("file path");
           batch.push(rar5::BatchEntry::File {
             path,
-            name: if e.name.is_empty() { None } else { Some(&e.name) },
+            name: if e.name.is_empty() {
+              None
+            } else {
+              Some(&e.name)
+            },
             level,
           });
         }
