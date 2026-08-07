@@ -152,6 +152,9 @@ jobs:
       - name: Build WASM
         run: npx napi build --platform --release --target wasm32-wasip1-threads
         shell: bash
+      - name: Patch WASI loader for Windows host paths
+        run: node scripts/patch-wasi-loader.mjs
+        shell: bash
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
@@ -160,6 +163,7 @@ jobs:
             smart-archive-rar.wasm32-wasi.wasm
             smart-archive-rar.wasm32-wasi.debug.wasm
             smart-archive-rar.wasi.cjs
+            wasi-path-map.cjs
             wasi-worker.mjs
           if-no-files-found: error
   test-bindings:
@@ -300,6 +304,7 @@ jobs:
           cp wasm/smart-archive-rar.wasm32-wasi.wasm \
              wasm/smart-archive-rar.wasm32-wasi.debug.wasm \
              wasm/smart-archive-rar.wasi.cjs \
+             wasm/wasi-path-map.cjs \
              wasm/wasi-worker.mjs release/ 2>/dev/null || true
           cp index.js index.d.ts release/ 2>/dev/null || true
           ls -la release/
