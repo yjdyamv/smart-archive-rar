@@ -132,6 +132,36 @@ jobs:
           path: |
             ${{ env.APP_NAME }}.*.node
           if-no-files-found: error
+  build-wasm:
+    name: build - wasm32-wasip1-threads
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: wasm32-wasip1-threads
+      - name: Install dependencies
+        run: npm ci
+      - name: Build WASM
+        run: npx napi build --platform --release --target wasm32-wasip1-threads
+        shell: bash
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: bindings-wasm32-wasip1-threads
+          path: |
+            smart-archive-rar.wasm32-wasi.wasm
+            smart-archive-rar.wasm32-wasi.debug.wasm
+            smart-archive-rar.wasi.cjs
+            wasi-worker.mjs
+          if-no-files-found: error
   test-bindings:
     name: Test bindings on ${{ matrix.settings.host }} (${{ matrix.settings.target }})
     needs:
@@ -197,6 +227,35 @@ jobs:
       - name: Test addon
         run: npm test
         shell: bash
+  test-wasm:
+    name: Test WASI binding on ${{ matrix.os }}
+    needs:
+      - build-wasm
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Download WASI artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: bindings-wasm32-wasip1-threads
+          path: .
+      - name: List files
+        run: ls -la
+        shell: bash
+      - name: Test addon (WASI forced)
+        run: NAPI_RS_FORCE_WASI=error npm test
+        shell: bash
   release:
     name: Release (${{ github.ref_name }})
     runs-on: ubuntu-latest
@@ -205,6 +264,8 @@ jobs:
       - lint
       - build
       - test-bindings
+      - build-wasm
+      - test-wasm
     permissions:
       contents: write
     steps:
@@ -227,10 +288,19 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: bindings
+      - name: Download WASI bindings
+        uses: actions/download-artifact@v8
+        with:
+          name: bindings-wasm32-wasip1-threads
+          path: wasm
       - name: Collect native addons
         run: |
           mkdir -p release
           find bindings -name '*.node' -exec cp -f {} release/ \;
+          cp wasm/smart-archive-rar.wasm32-wasi.wasm \
+             wasm/smart-archive-rar.wasm32-wasi.debug.wasm \
+             wasm/smart-archive-rar.wasi.cjs \
+             wasm/wasi-worker.mjs release/ 2>/dev/null || true
           cp index.js index.d.ts release/ 2>/dev/null || true
           ls -la release/
         shell: bash
@@ -241,5 +311,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
-            release/*.node release/index.js release/index.d.ts 2>&1 || \
-            gh release upload "$GITHUB_REF_NAME" release/*.node release/index.js release/index.d.ts --clobber
+            release/* 2>&1 || \
+            gh release upload "$GITHUB_REF_NAME" release/* --clobber

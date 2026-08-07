@@ -1,6 +1,6 @@
 {
   "name": "smart-archive-rar",
-  "version": "0.2.11",
+  "version": "0.3.0",
   "description": "RAR5 archive creation for the Smart Archive VS Code extension (napi-rs)",
   "main": "index.js",
   "license": "BSD-2-Clause",
@@ -20,7 +20,8 @@
       "x86_64-unknown-linux-musl",
       "aarch64-unknown-linux-gnu",
       "aarch64-unknown-linux-musl",
-      "armv7-unknown-linux-gnueabihf"
+      "armv7-unknown-linux-gnueabihf",
+      "wasm32-wasip1-threads"
     ]
   },
   "engines": {
@@ -32,6 +33,8 @@
     "test": "node --test __test__/*.test.mjs"
   },
   "devDependencies": {
+    "@emnapi/core": "2.0.0-alpha.3",
+    "@emnapi/runtime": "2.0.0-alpha.3",
     "@napi-rs/cli": "^3.8.2",
     "typescript": "^7.0.0"
   },
