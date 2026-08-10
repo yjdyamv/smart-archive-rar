@@ -134,6 +134,15 @@ function mapDeleteArgs(archivePath, names, password, platform = process.platform
   ]
 }
 
+function mapListArgs(archivePath, password, platform = process.platform) {
+  return [
+    typeof archivePath === 'string'
+      ? toGuestPath(archivePath, platform)
+      : archivePath,
+    password,
+  ]
+}
+
 module.exports = {
   toGuestPath,
   toHostPath,
@@ -143,4 +152,5 @@ module.exports = {
   mapRepairArgs,
   mapAppendOptions,
   mapDeleteArgs,
+  mapListArgs,
 }

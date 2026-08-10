@@ -27,6 +27,7 @@ const LOADER_EXPORT_LINES = [
   'module.exports.appendEntries = __napiModule.exports.appendEntries',
   'module.exports.createArchive = __napiModule.exports.createArchive',
   'module.exports.deleteEntries = __napiModule.exports.deleteEntries',
+  'module.exports.listEntries = __napiModule.exports.listEntries',
   'module.exports.repairArchive = __napiModule.exports.repairArchive',
 ]
 const LOADER_EXPORTS_CREATE_NEW = `const __wasiCreateArchive = __napiModule.exports.createArchive
@@ -61,6 +62,15 @@ module.exports.deleteEntries = function __wasiDeleteEntriesWrapper(
 ) {
   return __wasiDeleteEntries(
     ...__wasiPathMap.mapDeleteArgs(archivePath, names, password),
+  )
+}`
+const LOADER_EXPORTS_LIST_NEW = `const __wasiListEntries = __napiModule.exports.listEntries
+module.exports.listEntries = function __wasiListEntriesWrapper(
+  archivePath,
+  password,
+) {
+  return __wasiListEntries(
+    ...__wasiPathMap.mapListArgs(archivePath, password),
   )
 }`
 const LOADER_EXPORTS_REPAIR_NEW = `const __wasiRepairArchive = __napiModule.exports.repairArchive
@@ -102,7 +112,8 @@ function patchLoader(source) {
   source = source.replace(LOADER_EXPORT_LINES[1], LOADER_EXPORTS_CREATE_NEW)
   source = source.replace(LOADER_EXPORT_LINES[0], LOADER_EXPORTS_APPEND_NEW)
   source = source.replace(LOADER_EXPORT_LINES[2], LOADER_EXPORTS_DELETE_NEW)
-  source = source.replace(LOADER_EXPORT_LINES[3], LOADER_EXPORTS_REPAIR_NEW)
+  source = source.replace(LOADER_EXPORT_LINES[3], LOADER_EXPORTS_LIST_NEW)
+  source = source.replace(LOADER_EXPORT_LINES[4], LOADER_EXPORTS_REPAIR_NEW)
   return source
 }
 
