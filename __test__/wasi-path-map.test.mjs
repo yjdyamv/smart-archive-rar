@@ -7,6 +7,8 @@ import {
   mapCreateArchiveOptions,
   mapCreateResult,
   mapRepairArgs,
+  mapAppendOptions,
+  mapDeleteArgs,
 } from '../wasi-path-map.cjs'
 
 test('win32 absolute paths map to guest /<DRIVE>:/ paths', () => {
@@ -74,4 +76,25 @@ test('repair args map to guest paths', () => {
     '/C:/in.rar',
     '/C:/out.rar',
   ])
+})
+
+test('append options map archive path and entries but preserve other fields', () => {
+  const options = {
+    archivePath: 'C:\\existing.rar',
+    entries: [{ kind: 'file', path: 'C:\\a.txt', name: 'a.txt' }],
+    level: 3,
+  }
+  const mapped = mapAppendOptions(options, 'win32')
+  assert.equal(mapped.archivePath, '/C:/existing.rar')
+  assert.equal(mapped.entries[0].path, '/C:/a.txt')
+  assert.equal(mapped.entries[0].name, 'a.txt')
+  assert.equal(mapped.level, 3)
+  assert.equal(options.archivePath, 'C:\\existing.rar', 'input options must not mutate')
+})
+
+test('delete args map archive path and pass names and password through', () => {
+  assert.deepEqual(
+    mapDeleteArgs('C:\\del.rar', ['a.txt', 'b.txt'], 'pw', 'win32'),
+    ['/C:/del.rar', ['a.txt', 'b.txt'], 'pw'],
+  )
 })

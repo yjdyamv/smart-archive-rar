@@ -23,11 +23,13 @@ const LOADER_PREOPEN_OLD = `  preopens: {
   }`
 const LOADER_PREOPEN_NEW = `  preopens: __wasiPathMap.wasiPreopens(__rootDir),`
 
-const LOADER_EXPORTS_OLD = `module.exports = __napiModule.exports
-module.exports.createArchive = __napiModule.exports.createArchive
-module.exports.repairArchive = __napiModule.exports.repairArchive`
-const LOADER_EXPORTS_NEW = `module.exports = __napiModule.exports
-const __wasiCreateArchive = __napiModule.exports.createArchive
+const LOADER_EXPORT_LINES = [
+  'module.exports.appendEntries = __napiModule.exports.appendEntries',
+  'module.exports.createArchive = __napiModule.exports.createArchive',
+  'module.exports.deleteEntries = __napiModule.exports.deleteEntries',
+  'module.exports.repairArchive = __napiModule.exports.repairArchive',
+]
+const LOADER_EXPORTS_CREATE_NEW = `const __wasiCreateArchive = __napiModule.exports.createArchive
 module.exports.createArchive = function __wasiCreateArchiveWrapper(
   opts,
   onProgress,
@@ -38,8 +40,30 @@ module.exports.createArchive = function __wasiCreateArchiveWrapper(
     onProgress,
     signal,
   ).then((result) => __wasiPathMap.mapCreateResult(result))
-}
-const __wasiRepairArchive = __napiModule.exports.repairArchive
+}`
+const LOADER_EXPORTS_APPEND_NEW = `const __wasiAppendEntries = __napiModule.exports.appendEntries
+module.exports.appendEntries = function __wasiAppendEntriesWrapper(
+  opts,
+  onProgress,
+  signal,
+) {
+  return __wasiAppendEntries(
+    __wasiPathMap.mapAppendOptions(opts),
+    onProgress,
+    signal,
+  ).then((result) => __wasiPathMap.mapCreateResult(result))
+}`
+const LOADER_EXPORTS_DELETE_NEW = `const __wasiDeleteEntries = __napiModule.exports.deleteEntries
+module.exports.deleteEntries = function __wasiDeleteEntriesWrapper(
+  archivePath,
+  names,
+  password,
+) {
+  return __wasiDeleteEntries(
+    ...__wasiPathMap.mapDeleteArgs(archivePath, names, password),
+  )
+}`
+const LOADER_EXPORTS_REPAIR_NEW = `const __wasiRepairArchive = __napiModule.exports.repairArchive
 module.exports.repairArchive = function __wasiRepairArchiveWrapper(
   inputPath,
   outputPath,
@@ -70,10 +94,15 @@ function patchLoader(source) {
     throw new Error('loader template changed: expected default preopens block')
   }
   source = source.replace(LOADER_PREOPEN_OLD, LOADER_PREOPEN_NEW)
-  if (!source.includes(LOADER_EXPORTS_OLD)) {
-    throw new Error('loader template changed: expected default export block')
+  for (const line of LOADER_EXPORT_LINES) {
+    if (!source.includes(line)) {
+      throw new Error(`loader template changed: expected export line ${line}`)
+    }
   }
-  source = source.replace(LOADER_EXPORTS_OLD, LOADER_EXPORTS_NEW)
+  source = source.replace(LOADER_EXPORT_LINES[1], LOADER_EXPORTS_CREATE_NEW)
+  source = source.replace(LOADER_EXPORT_LINES[0], LOADER_EXPORTS_APPEND_NEW)
+  source = source.replace(LOADER_EXPORT_LINES[2], LOADER_EXPORTS_DELETE_NEW)
+  source = source.replace(LOADER_EXPORT_LINES[3], LOADER_EXPORTS_REPAIR_NEW)
   return source
 }
 

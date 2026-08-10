@@ -105,6 +105,35 @@ function mapRepairArgs(
   ]
 }
 
+function mapAppendOptions(options, platform = process.platform) {
+  if (!options || typeof options !== 'object') return options
+  const mapped = { ...options }
+  if (typeof mapped.archivePath === 'string') {
+    mapped.archivePath = toGuestPath(mapped.archivePath, platform)
+  }
+  if (Array.isArray(mapped.entries)) {
+    mapped.entries = mapped.entries.map((entry) => {
+      if (!entry || typeof entry !== 'object') return entry
+      const e = { ...entry }
+      if (typeof e.path === 'string') {
+        e.path = toGuestPath(e.path, platform)
+      }
+      return e
+    })
+  }
+  return mapped
+}
+
+function mapDeleteArgs(archivePath, names, password, platform = process.platform) {
+  return [
+    typeof archivePath === 'string'
+      ? toGuestPath(archivePath, platform)
+      : archivePath,
+    names,
+    password,
+  ]
+}
+
 module.exports = {
   toGuestPath,
   toHostPath,
@@ -112,4 +141,6 @@ module.exports = {
   mapCreateArchiveOptions,
   mapCreateResult,
   mapRepairArgs,
+  mapAppendOptions,
+  mapDeleteArgs,
 }
