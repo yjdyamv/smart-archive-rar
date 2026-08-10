@@ -413,10 +413,12 @@ pub fn repair_archive(input_path: String, output_path: String) -> Result<()> {
 pub fn rebuild_missing_volumes(first_volume: String) -> Result<Vec<String>> {
   let paths = rar5::rebuild_missing_volumes(Path::new(&first_volume))
     .map_err(|err| Error::new(Status::GenericFailure, format!("rebuild failed: {err}")))?;
-  Ok(paths
-    .into_iter()
-    .map(|p| p.to_string_lossy().into_owned())
-    .collect())
+  Ok(
+    paths
+      .into_iter()
+      .map(|p| p.to_string_lossy().into_owned())
+      .collect(),
+  )
 }
 
 #[napi(object)]
