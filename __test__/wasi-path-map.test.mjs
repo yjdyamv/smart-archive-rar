@@ -9,6 +9,7 @@ import {
   mapRepairArgs,
   mapAppendOptions,
   mapDeleteArgs,
+  mapListArgs,
 } from '../wasi-path-map.cjs'
 
 test('win32 absolute paths map to guest /<DRIVE>:/ paths', () => {
@@ -97,4 +98,8 @@ test('delete args map archive path and pass names and password through', () => {
     mapDeleteArgs('C:\\del.rar', ['a.txt', 'b.txt'], 'pw', 'win32'),
     ['/C:/del.rar', ['a.txt', 'b.txt'], 'pw'],
   )
+})
+
+test('list args map archive path and pass password through', () => {
+  assert.deepEqual(mapListArgs('C:\\a.rar', 'pw', 'win32'), ['/C:/a.rar', 'pw'])
 })
