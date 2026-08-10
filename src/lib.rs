@@ -533,6 +533,24 @@ pub fn delete_entries(
   Ok(count as u32)
 }
 
+/// List the member names of a RAR5 archive.
+#[napi]
+pub fn list_entries(archive_path: String, password: Option<String>) -> Result<Vec<String>> {
+  let archive = match password.as_deref() {
+    Some(pw) if !pw.is_empty() => {
+      rar5::RarArchive::open_with_password(&archive_path, pw).map_err(to_napi_error)?
+    }
+    _ => rar5::RarArchive::open(&archive_path).map_err(to_napi_error)?,
+  };
+  Ok(
+    archive
+      .namelist()
+      .into_iter()
+      .map(|name| name.to_string())
+      .collect(),
+  )
+}
+
 /// Create a RAR5 archive from the given entries.
 #[napi]
 pub fn create_archive(

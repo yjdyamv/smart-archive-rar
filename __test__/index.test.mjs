@@ -288,3 +288,34 @@ test('rejects unknown entry kinds', async () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('appendEntries keeps existing members and listEntries/deleteEntries work', async () => {
+  const dir = tempDir()
+  try {
+    const out = join(dir, 'm.rar')
+    await createArchive({
+      outPath: out,
+      entries: [{ kind: 'bytes', name: 'a.txt', data: Buffer.from('alpha') }],
+    })
+
+    const { appendEntries, listEntries, deleteEntries } = await import('../index.js')
+    const res = await appendEntries({
+      archivePath: out,
+      level: 3,
+      entries: [{ kind: 'bytes', name: 'dir/b.txt', data: Buffer.from('beta') }],
+    })
+    assert.deepEqual(res.files, [out])
+
+    let names = listEntries(out)
+    assert.deepEqual(names.sort(), ['a.txt', 'dir/b.txt'])
+
+    const deleted = deleteEntries(out, ['a.txt'])
+    assert.equal(deleted, 1)
+    names = listEntries(out)
+    assert.deepEqual(names, ['dir/b.txt'])
+
+    assert.throws(() => listEntries(join(dir, 'missing.rar')), /repair|open|read|rar5/i)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

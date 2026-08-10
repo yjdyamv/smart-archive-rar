@@ -90,6 +90,9 @@ export interface EntryInput {
   data?: Buffer
 }
 
+/** List the member names of a RAR5 archive. */
+export declare function listEntries(archivePath: string, password?: string | undefined | null): Array<string>
+
 export interface ProgressData {
   done: number
   total: number
