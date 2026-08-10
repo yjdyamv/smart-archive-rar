@@ -80,9 +80,9 @@ pub struct CreateArchiveTask {
   progress: Option<ThreadsafeFunction<ProgressData, ()>>,
 }
 
-fn plan_entries(opts: &CreateArchiveOptions) -> Result<Vec<PlannedEntry>> {
-  let mut planned = Vec::with_capacity(opts.entries.len());
-  for e in &opts.entries {
+fn plan_entries(entries: &[EntryInput]) -> Result<Vec<PlannedEntry>> {
+  let mut planned = Vec::with_capacity(entries.len());
+  for e in entries {
     match e.kind.as_str() {
       "file" => {
         let path = e
@@ -204,13 +204,103 @@ fn to_napi_error(err: rar5::RarError) -> Error {
   Error::new(Status::GenericFailure, format!("rar5: {err}"))
 }
 
+fn build_batch(planned: &[PlannedEntry], level: u8) -> Vec<rar5::BatchEntry<'_>> {
+  let mut batch: Vec<rar5::BatchEntry<'_>> = Vec::with_capacity(planned.len());
+  for e in planned {
+    match e.kind.as_str() {
+      "file" => {
+        let path = e.path.as_ref().expect("file path");
+        batch.push(rar5::BatchEntry::File {
+          path,
+          name: if e.name.is_empty() {
+            None
+          } else {
+            Some(&e.name)
+          },
+          level,
+        });
+      }
+      "dir" => {
+        let path = e.path.as_ref().expect("dir path");
+        batch.push(rar5::BatchEntry::Directory {
+          path,
+          name: Some(&e.name),
+        });
+      }
+      "bytes" => {
+        let data = e.data.as_ref().expect("bytes data");
+        batch.push(rar5::BatchEntry::Bytes {
+          name: &e.name,
+          data,
+          level,
+        });
+      }
+      _ => {}
+    }
+  }
+  batch
+}
+
+fn write_batch(
+  archive: &mut rar5::RarArchive,
+  batch: &[rar5::BatchEntry<'_>],
+  total_bytes: u64,
+  progress: Option<ThreadsafeFunction<ProgressData, ()>>,
+) -> Result<()> {
+  let terminal = progress.map(Arc::new);
+  if let Some(tsfn) = terminal.as_ref() {
+    let cb_tsfn = tsfn.clone();
+    let emitted = Arc::new(AtomicU64::new(0));
+    let emit = emitted.clone();
+    let last_done = Arc::new(AtomicU64::new(0));
+    let last = last_done.clone();
+    archive.set_progress_callback(Some(Box::new(move |done, _file_total| {
+      if done == 0 {
+        // rar-rs starts every member with a (0, file_total) event; reset
+        // the per-file baseline so only the delta is accumulated.
+        last.store(0, Ordering::Relaxed);
+      }
+      let prev = last.swap(done, Ordering::Relaxed);
+      let delta = done.saturating_sub(prev);
+      let overall = emit.fetch_add(delta, Ordering::Relaxed) + delta;
+      let _ = cb_tsfn.call(
+        Ok(ProgressData {
+          done: overall.min(total_bytes) as f64,
+          total: total_bytes as f64,
+        }),
+        ThreadsafeFunctionCallMode::NonBlocking,
+      );
+    })));
+    archive.add_batch(batch).map_err(to_napi_error)?;
+  } else {
+    archive.add_batch(batch).map_err(to_napi_error)?;
+  }
+
+  archive.close().map_err(to_napi_error)?;
+
+  if let Some(tsfn) = terminal {
+    // Terminal 100% event after the archive is fully closed (including
+    // recovery records and volume finalization). Delivery is asynchronous,
+    // so the JS side may still observe it a tick after the promise
+    // resolves.
+    let _ = tsfn.call(
+      Ok(ProgressData {
+        done: total_bytes as f64,
+        total: total_bytes as f64,
+      }),
+      ThreadsafeFunctionCallMode::Blocking,
+    );
+  }
+  Ok(())
+}
+
 #[napi]
 impl Task for CreateArchiveTask {
   type Output = CreateResult;
   type JsValue = CreateResult;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    let planned = plan_entries(&self.opts)?;
+    let planned = plan_entries(&self.opts.entries)?;
     let total_bytes: u64 = planned.iter().try_fold(0u64, |acc, e| {
       let s = entry_size(e)?;
       let next = acc.saturating_add(s);
@@ -237,39 +327,7 @@ impl Task for CreateArchiveTask {
     }
 
     let level = self.opts.level.unwrap_or(3).min(5) as u8;
-    let mut batch: Vec<rar5::BatchEntry<'_>> = Vec::with_capacity(planned.len());
-    for e in &planned {
-      match e.kind.as_str() {
-        "file" => {
-          let path = e.path.as_ref().expect("file path");
-          batch.push(rar5::BatchEntry::File {
-            path,
-            name: if e.name.is_empty() {
-              None
-            } else {
-              Some(&e.name)
-            },
-            level,
-          });
-        }
-        "dir" => {
-          let path = e.path.as_ref().expect("dir path");
-          batch.push(rar5::BatchEntry::Directory {
-            path,
-            name: Some(&e.name),
-          });
-        }
-        "bytes" => {
-          let data = e.data.as_ref().expect("bytes data");
-          batch.push(rar5::BatchEntry::Bytes {
-            name: &e.name,
-            data,
-            level,
-          });
-        }
-        _ => {}
-      }
-    }
+    let batch = build_batch(&planned, level);
     let out = Path::new(&self.opts.out_path);
     if let Some(parent) = out.parent() {
       fs::create_dir_all(parent)
@@ -304,51 +362,8 @@ impl Task for CreateArchiveTask {
       rar5::RarArchive::create(out).map_err(to_napi_error)?
     };
 
-    let terminal = self.progress.take().map(Arc::new);
-    if let Some(tsfn) = terminal.as_ref() {
-      let cb_tsfn = tsfn.clone();
-      let emitted = Arc::new(AtomicU64::new(0));
-      let emit = emitted.clone();
-      let last_done = Arc::new(AtomicU64::new(0));
-      let last = last_done.clone();
-      archive.set_progress_callback(Some(Box::new(move |done, _file_total| {
-        if done == 0 {
-          // rar-rs starts every member with a (0, file_total) event; reset
-          // the per-file baseline so only the delta is accumulated.
-          last.store(0, Ordering::Relaxed);
-        }
-        let prev = last.swap(done, Ordering::Relaxed);
-        let delta = done.saturating_sub(prev);
-        let overall = emit.fetch_add(delta, Ordering::Relaxed) + delta;
-        let _ = cb_tsfn.call(
-          Ok(ProgressData {
-            done: overall.min(total_bytes) as f64,
-            total: total_bytes as f64,
-          }),
-          ThreadsafeFunctionCallMode::NonBlocking,
-        );
-      })));
-      archive.add_batch(&batch).map_err(to_napi_error)?;
-    } else {
-      archive.add_batch(&batch).map_err(to_napi_error)?;
-    }
-
-    archive.close().map_err(to_napi_error)?;
+    write_batch(&mut archive, &batch, total_bytes, self.progress.take())?;
     drop(archive);
-
-    if let Some(tsfn) = terminal {
-      // Terminal 100% event after the archive is fully closed (including
-      // recovery records and volume finalization). Delivery is asynchronous,
-      // so the JS side may still observe it a tick after the promise
-      // resolves.
-      let _ = tsfn.call(
-        Ok(ProgressData {
-          done: total_bytes as f64,
-          total: total_bytes as f64,
-        }),
-        ThreadsafeFunctionCallMode::Blocking,
-      );
-    }
 
     let mut files = rar5::discover_volumes(out)
       .into_iter()
@@ -377,7 +392,7 @@ pub fn repair_archive(input_path: String, output_path: String) -> Result<()> {
       format!("read {}: {err}", input_path),
     )
   })?;
-  let repaired = rar5::recovery::rar5::repair_inline_recovery_archive(&input)
+  let repaired = rar5::repair_archive(&input)
     .map_err(|err| Error::new(Status::GenericFailure, format!("repair failed: {err}")))?;
   fs::write(&output_path, &repaired).map_err(|err| {
     Error::new(
@@ -386,6 +401,134 @@ pub fn repair_archive(input_path: String, output_path: String) -> Result<()> {
     )
   })?;
   Ok(())
+}
+
+/// Rebuild missing volumes of a multi-volume RAR5 set from its `.rev`
+/// recovery volumes (like WinRAR `rc`).
+///
+/// `first_volume` is the path of `name.part1.rar`; every missing volume is
+/// reconstructed from the `.rev` parity volumes into the same directory.
+/// Returns the paths of all volumes produced.
+#[napi]
+pub fn rebuild_missing_volumes(first_volume: String) -> Result<Vec<String>> {
+  let paths = rar5::rebuild_missing_volumes(Path::new(&first_volume))
+    .map_err(|err| Error::new(Status::GenericFailure, format!("rebuild failed: {err}")))?;
+  Ok(paths
+    .into_iter()
+    .map(|p| p.to_string_lossy().into_owned())
+    .collect())
+}
+
+#[napi(object)]
+pub struct AppendArchiveOptions {
+  /// Existing RAR5 archive to append to (single-volume only).
+  pub archive_path: String,
+  pub entries: Vec<EntryInput>,
+  /// Compression level 0..=5 (default 3).
+  pub level: Option<u32>,
+  /// Password of the existing archive (needed when its content is
+  /// encrypted so the solid chain can be extended).
+  pub password: Option<String>,
+}
+
+pub struct AppendArchiveTask {
+  opts: AppendArchiveOptions,
+  progress: Option<ThreadsafeFunction<ProgressData, ()>>,
+}
+
+#[napi]
+impl Task for AppendArchiveTask {
+  type Output = CreateResult;
+  type JsValue = CreateResult;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    let planned = plan_entries(&self.opts.entries)?;
+    let total_bytes: u64 = planned.iter().try_fold(0u64, |acc, e| {
+      let s = entry_size(e)?;
+      let next = acc.saturating_add(s);
+      if next > MAX_TOTAL_BYTES {
+        return Err(Error::new(
+          Status::InvalidArg,
+          "total input size exceeds 32 GiB limit",
+        ));
+      }
+      Ok(next)
+    })?;
+
+    let level = self.opts.level.unwrap_or(3).min(5) as u8;
+    let batch = build_batch(&planned, level);
+    let mut archive = match self.opts.password.as_deref() {
+      Some(pw) if !pw.is_empty() => {
+        rar5::RarArchive::open_append_with_password(&self.opts.archive_path, pw)
+          .map_err(to_napi_error)?
+      }
+      _ => rar5::RarArchive::open_append(&self.opts.archive_path).map_err(to_napi_error)?,
+    };
+
+    write_batch(&mut archive, &batch, total_bytes, self.progress.take())?;
+    drop(archive);
+
+    let mut files = rar5::discover_volumes(Path::new(&self.opts.archive_path))
+      .into_iter()
+      .map(|p| p.to_string_lossy().into_owned())
+      .collect::<Vec<_>>();
+    files.sort();
+    files.dedup();
+
+    Ok(CreateResult { files })
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+/// Append entries to an existing RAR5 archive without rebuilding it.
+///
+/// Existing members are preserved verbatim (never recompressed); only the
+/// trailing quick-open/recovery/end blocks are truncated and rewritten.
+/// Recovery records are regenerated over the whole archive. Multi-volume
+/// archives are not supported (matching the official `rar` CLI).
+#[napi]
+pub fn append_entries(
+  opts: AppendArchiveOptions,
+  on_progress: Option<ThreadsafeFunction<ProgressData, ()>>,
+  signal: Option<AbortSignal>,
+) -> AsyncTask<AppendArchiveTask> {
+  AsyncTask::with_optional_signal(
+    AppendArchiveTask {
+      opts,
+      progress: on_progress,
+    },
+    signal,
+  )
+}
+
+/// Delete members from a RAR5 archive without rebuilding it.
+///
+/// Non-solid archives are rewritten surgically: kept members are copied
+/// verbatim, never recompressed (like the official `rar d`). Solid chains
+/// that lose a member are recompressed from the chain start only. For
+/// multi-volume archives, kept payloads are re-split at the volume size
+/// limit and `.rev` recovery volumes are regenerated.
+///
+/// Fails when any requested name is not present, or when the archive is
+/// locked. Returns the number of deleted members.
+#[napi]
+pub fn delete_entries(
+  archive_path: String,
+  names: Vec<String>,
+  password: Option<String>,
+) -> Result<u32> {
+  let mut archive = match password.as_deref() {
+    Some(pw) if !pw.is_empty() => {
+      rar5::RarArchive::open_with_password(&archive_path, pw).map_err(to_napi_error)?
+    }
+    _ => rar5::RarArchive::open(&archive_path).map_err(to_napi_error)?,
+  };
+  let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+  let count = archive.delete(&refs).map_err(to_napi_error)?;
+  Ok(count as u32)
 }
 
 /// Create a RAR5 archive from the given entries.

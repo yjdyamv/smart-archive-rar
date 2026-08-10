@@ -700,5 +700,8 @@ if (!nativeBinding) {
 }
 
 module.exports = nativeBinding
+module.exports.appendEntries = nativeBinding.appendEntries
 module.exports.createArchive = nativeBinding.createArchive
+module.exports.deleteEntries = nativeBinding.deleteEntries
+module.exports.rebuildMissingVolumes = nativeBinding.rebuildMissingVolumes
 module.exports.repairArchive = nativeBinding.repairArchive
