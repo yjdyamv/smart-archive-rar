@@ -342,7 +342,10 @@ impl Task for CreateArchiveTask {
       if rev_count > 0 {
         if let Some(pw) = password {
           rar5::RarArchive::create_multivolume_with_recovery_count_and_password(
-            out, size as u64, rev_count, pw,
+            out,
+            size as u64,
+            rev_count,
+            pw,
           )
           .map_err(to_napi_error)?
         } else {
