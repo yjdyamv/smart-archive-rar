@@ -353,10 +353,16 @@ impl Task for CreateArchiveTask {
             .map_err(to_napi_error)?
         }
       } else if let Some(pw) = password {
-        // Multi-volume archives are file-encrypted only: header encryption
-        // is not supported by the rar5 library for volume sets.
-        rar5::RarArchive::create_multivolume_with_password(out, size as u64, pw)
-          .map_err(to_napi_error)?
+        if self.opts.encrypt_headers.unwrap_or(false) {
+          // Header encryption for volume sets: every volume carries the
+          // plaintext encryption header and all blocks are encrypted
+          // (WinRAR -hp equivalent).
+          rar5::RarArchive::create_multivolume_with_password_headers(out, size as u64, pw)
+            .map_err(to_napi_error)?
+        } else {
+          rar5::RarArchive::create_multivolume_with_password(out, size as u64, pw)
+            .map_err(to_napi_error)?
+        }
       } else {
         rar5::RarArchive::create_multivolume(out, size as u64).map_err(to_napi_error)?
       }
