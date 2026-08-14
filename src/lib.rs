@@ -337,14 +337,27 @@ impl Task for CreateArchiveTask {
     let rec = self.opts.recovery_percent.unwrap_or(0).min(100);
     let rec = if rec == 0 { None } else { Some(rec) };
     let rev_count = self.opts.recovery_volume_count.unwrap_or(0);
+    let password = self.opts.password.as_deref().filter(|p| !p.is_empty());
     let mut archive = if let Some(size) = self.opts.volume_size {
       if rev_count > 0 {
-        rar5::RarArchive::create_multivolume_with_recovery_count(out, size as u64, rev_count)
+        if let Some(pw) = password {
+          rar5::RarArchive::create_multivolume_with_recovery_count_and_password(
+            out, size as u64, rev_count, pw,
+          )
+          .map_err(to_napi_error)?
+        } else {
+          rar5::RarArchive::create_multivolume_with_recovery_count(out, size as u64, rev_count)
+            .map_err(to_napi_error)?
+        }
+      } else if let Some(pw) = password {
+        // Multi-volume archives are file-encrypted only: header encryption
+        // is not supported by the rar5 library for volume sets.
+        rar5::RarArchive::create_multivolume_with_password(out, size as u64, pw)
           .map_err(to_napi_error)?
       } else {
         rar5::RarArchive::create_multivolume(out, size as u64).map_err(to_napi_error)?
       }
-    } else if let Some(pw) = self.opts.password.as_deref() {
+    } else if let Some(pw) = password {
       match (self.opts.encrypt_headers.unwrap_or(false), rec) {
         (true, Some(pct)) => rar5::RarArchive::create_with_password_headers_recovery(out, pw, pct)
           .map_err(to_napi_error)?,
