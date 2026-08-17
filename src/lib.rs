@@ -749,11 +749,5 @@ pub fn extract_archive(
   opts: ExtractArchiveOptions,
   signal: Option<AbortSignal>,
 ) -> AsyncTask<ExtractArchiveTask> {
-  AsyncTask::with_optional_signal(
-    ExtractArchiveTask {
-      archive_path,
-      opts,
-    },
-    signal,
-  )
+  AsyncTask::with_optional_signal(ExtractArchiveTask { archive_path, opts }, signal)
 }
