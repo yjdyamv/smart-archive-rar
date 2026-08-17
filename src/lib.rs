@@ -54,6 +54,29 @@ pub struct CreateArchiveOptions {
   pub volume_size: Option<i64>,
   /// Reject the operation when the summed input size exceeds this.
   pub max_total_bytes: Option<i64>,
+  /// Dictionary size (like WinRAR `-md<size>[k|m|g]`, no unit = MiB).
+  /// Values up to 4 GiB must be powers of two (128 KiB .. 4 GiB); values
+  /// above 4 GiB are accepted as-is and produce RAR7 (v70) archives.
+  pub dict_size: Option<String>,
+  /// Create a solid archive (better ratio, slower random access).
+  pub solid: Option<bool>,
+  /// Add a quick-open record for fast member listing.
+  pub quick_open: Option<bool>,
+  /// Write BLAKE2sp hash records for every member (like WinRAR `-htb`).
+  pub blake2: Option<bool>,
+  /// Compression threads (1..=64).
+  pub threads: Option<u32>,
+  /// Save the creation time (Windows) / ctime (Unix) in the FILE_TIME
+  /// extra record (like WinRAR `-tsc`).
+  pub save_ctime: Option<bool>,
+  /// Save the last access time (like WinRAR `-tsa`).
+  pub save_atime: Option<bool>,
+  /// Store timestamps at 1-second precision (like WinRAR `-ts...1`).
+  pub time_precision_seconds: Option<bool>,
+  /// Save the owner and group (numeric ids) on Unix (like WinRAR `-ow`).
+  pub save_owner: Option<bool>,
+  /// Save NTFS alternate data streams (like WinRAR `-os`; Windows only).
+  pub save_streams: Option<bool>,
 }
 
 #[napi(object)]
@@ -200,6 +223,37 @@ fn basename(path: &Path) -> String {
     .unwrap_or_default()
 }
 
+/// Parse a WinRAR-style dictionary size (`-md<size>[k|m|g]`, no unit =
+/// MiB) into the two `CreateOptions` fields: values up to 4 GiB must be
+/// powers of two (RAR5 dict log), anything above is accepted as-is and
+/// selects RAR7 (v70) with an actual byte size.
+fn parse_dict_size(s: &str) -> Result<(Option<u8>, Option<u64>)> {
+  let s = s.trim();
+  let (num, mult) = match s.chars().last() {
+    Some('k') | Some('K') => (&s[..s.len() - 1], 1024u64),
+    Some('m') | Some('M') => (&s[..s.len() - 1], 1024 * 1024),
+    Some('g') | Some('G') => (&s[..s.len() - 1], 1024 * 1024 * 1024),
+    _ => (s, 1024 * 1024),
+  };
+  let bytes = num
+    .parse::<u64>()
+    .ok()
+    .and_then(|n| n.checked_mul(mult))
+    .filter(|b| *b >= 128 * 1024)
+    .ok_or_else(|| Error::new(Status::InvalidArg, format!("invalid dictionary size: {s}")))?;
+  if bytes <= 4 * 1024 * 1024 * 1024 {
+    if !bytes.is_power_of_two() {
+      return Err(Error::new(
+        Status::InvalidArg,
+        format!("dictionary sizes up to 4 GiB must be powers of two: {s}"),
+      ));
+    }
+    Ok((Some((bytes.trailing_zeros() - 17) as u8), None))
+  } else {
+    Ok((None, Some(bytes)))
+  }
+}
+
 fn to_napi_error(err: rar5::RarError) -> Error {
   Error::new(Status::GenericFailure, format!("rar5: {err}"))
 }
@@ -334,55 +388,41 @@ impl Task for CreateArchiveTask {
         .map_err(|err| Error::new(Status::GenericFailure, format!("mkdir: {err}")))?;
     }
 
+    if let Some(threads) = self.opts.threads {
+      let threads = threads.max(1).min(64) as usize;
+      rar5::set_compression_threads(threads);
+      rar5::set_extraction_threads(threads);
+    }
+
     let rec = self.opts.recovery_percent.unwrap_or(0).min(100);
     let rec = if rec == 0 { None } else { Some(rec) };
     let rev_count = self.opts.recovery_volume_count.unwrap_or(0);
     let password = self.opts.password.as_deref().filter(|p| !p.is_empty());
-    let mut archive = if let Some(size) = self.opts.volume_size {
-      if rev_count > 0 {
-        if let Some(pw) = password {
-          rar5::RarArchive::create_multivolume_with_recovery_count_and_password(
-            out,
-            size as u64,
-            rev_count,
-            pw,
-          )
-          .map_err(to_napi_error)?
-        } else {
-          rar5::RarArchive::create_multivolume_with_recovery_count(out, size as u64, rev_count)
-            .map_err(to_napi_error)?
-        }
-      } else if let Some(pw) = password {
-        if self.opts.encrypt_headers.unwrap_or(false) {
-          // Header encryption for volume sets: every volume carries the
-          // plaintext encryption header and all blocks are encrypted
-          // (WinRAR -hp equivalent).
-          rar5::RarArchive::create_multivolume_with_password_headers(out, size as u64, pw)
-            .map_err(to_napi_error)?
-        } else {
-          rar5::RarArchive::create_multivolume_with_password(out, size as u64, pw)
-            .map_err(to_napi_error)?
-        }
-      } else {
-        rar5::RarArchive::create_multivolume(out, size as u64).map_err(to_napi_error)?
-      }
-    } else if let Some(pw) = password {
-      match (self.opts.encrypt_headers.unwrap_or(false), rec) {
-        (true, Some(pct)) => rar5::RarArchive::create_with_password_headers_recovery(out, pw, pct)
-          .map_err(to_napi_error)?,
-        (true, None) => {
-          rar5::RarArchive::create_with_password_headers(out, pw).map_err(to_napi_error)?
-        }
-        (false, Some(pct)) => {
-          rar5::RarArchive::create_with_password_recovery(out, pw, pct).map_err(to_napi_error)?
-        }
-        (false, None) => rar5::RarArchive::create_with_password(out, pw).map_err(to_napi_error)?,
-      }
-    } else if let Some(pct) = rec {
-      rar5::RarArchive::create_with_recovery(out, pct).map_err(to_napi_error)?
-    } else {
-      rar5::RarArchive::create(out).map_err(to_napi_error)?
+    let (dict_size_log, dict_size_bytes) = match self.opts.dict_size.as_deref() {
+      Some(s) => parse_dict_size(s)?,
+      None => (None, None),
     };
+    let create_opts = rar5::CreateOptions {
+      solid: self.opts.solid.unwrap_or(false),
+      quick_open: self.opts.quick_open.unwrap_or(false),
+      blake2: self.opts.blake2.unwrap_or(false),
+      password: password.map(|p| p.to_string()),
+      encrypt_headers: self.opts.encrypt_headers.unwrap_or(false),
+      recovery_percent: rec,
+      recovery_volumes_percent: None,
+      recovery_volume_count: if rev_count > 0 { Some(rev_count) } else { None },
+      volume_size: self.opts.volume_size.map(|s| s as u64),
+      dict_size_log,
+      dict_size_bytes,
+      save_ctime: self.opts.save_ctime.unwrap_or(false),
+      save_atime: self.opts.save_atime.unwrap_or(false),
+      save_mtime: true,
+      time_precision_seconds: self.opts.time_precision_seconds.unwrap_or(false),
+      save_owner: self.opts.save_owner.unwrap_or(false),
+      save_streams: self.opts.save_streams.unwrap_or(false),
+    };
+    let mut archive =
+      rar5::RarArchive::create_with_options(out, create_opts).map_err(to_napi_error)?;
 
     write_batch(&mut archive, &batch, total_bytes, self.progress.take())?;
     drop(archive);
@@ -453,6 +493,9 @@ pub struct AppendArchiveOptions {
   /// Password of the existing archive (needed when its content is
   /// encrypted so the solid chain can be extended).
   pub password: Option<String>,
+  /// Dictionary size for the added members (like `-md`; see
+  /// [`CreateArchiveOptions::dict_size`]).
+  pub dict_size: Option<String>,
 }
 
 pub struct AppendArchiveTask {
@@ -481,6 +524,10 @@ impl Task for AppendArchiveTask {
 
     let level = self.opts.level.unwrap_or(3).min(5) as u8;
     let batch = build_batch(&planned, level);
+    let (dict_size_log, dict_size_bytes) = match self.opts.dict_size.as_deref() {
+      Some(s) => parse_dict_size(s)?,
+      None => (None, None),
+    };
     let mut archive = match self.opts.password.as_deref() {
       Some(pw) if !pw.is_empty() => {
         rar5::RarArchive::open_append_with_password(&self.opts.archive_path, pw)
@@ -488,6 +535,7 @@ impl Task for AppendArchiveTask {
       }
       _ => rar5::RarArchive::open_append(&self.opts.archive_path).map_err(to_napi_error)?,
     };
+    archive.set_dictionary(dict_size_log, dict_size_bytes);
 
     write_batch(&mut archive, &batch, total_bytes, self.progress.take())?;
     drop(archive);
@@ -584,6 +632,127 @@ pub fn create_archive(
     CreateArchiveTask {
       opts,
       progress: on_progress,
+    },
+    signal,
+  )
+}
+
+/// One member's details for [`list_entries_detailed`].
+#[napi(object)]
+pub struct EntryInfo {
+  pub name: String,
+  /// Uncompressed size in bytes (JS number; exact up to 2^53).
+  pub size: f64,
+  /// On-disk (packed) size in bytes.
+  pub packed_size: f64,
+  /// Compression method: 0 = store, 1..=5 (level).
+  pub method: u8,
+  pub is_dir: bool,
+  /// Modification time as Unix seconds (0 when unknown).
+  pub mtime: f64,
+}
+
+/// List the members of a RAR5 archive with sizes and methods.
+#[napi]
+pub fn list_entries_detailed(
+  archive_path: String,
+  password: Option<String>,
+) -> Result<Vec<EntryInfo>> {
+  let archive = match password.as_deref() {
+    Some(pw) if !pw.is_empty() => {
+      rar5::RarArchive::open_with_password(&archive_path, pw).map_err(to_napi_error)?
+    }
+    _ => rar5::RarArchive::open(&archive_path).map_err(to_napi_error)?,
+  };
+  Ok(
+    archive
+      .list()
+      .iter()
+      .map(|e| EntryInfo {
+        name: e.name().to_string(),
+        size: e.size() as f64,
+        packed_size: e.compressed_size() as f64,
+        method: e.header.comp_method,
+        is_dir: e.is_dir(),
+        mtime: e.header.mtime as f64,
+      })
+      .collect(),
+  )
+}
+
+/// Options for [`extract_archive`].
+#[napi(object)]
+pub struct ExtractArchiveOptions {
+  /// Destination directory (created when missing).
+  pub dest_path: String,
+  /// Password for encrypted archives.
+  pub password: Option<String>,
+  /// Extract members flat (basename only, no directory tree).
+  pub flat: Option<bool>,
+  /// Maximum dictionary size in bytes accepted when decoding a member.
+  /// WinRAR-compatible default: 4 GiB (RAR7 v70 members with larger
+  /// dictionaries are refused). Pass 0 for no limit.
+  pub max_dict_size: Option<i64>,
+}
+
+struct ExtractArchiveTask {
+  archive_path: String,
+  opts: ExtractArchiveOptions,
+}
+
+impl Task for ExtractArchiveTask {
+  type Output = ();
+  type JsValue = ();
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    let mut archive = match self.opts.password.as_deref() {
+      Some(pw) if !pw.is_empty() => {
+        rar5::RarArchive::open_with_password(&self.archive_path, pw).map_err(to_napi_error)?
+      }
+      _ => rar5::RarArchive::open(&self.archive_path).map_err(to_napi_error)?,
+    };
+    let dest = Path::new(&self.opts.dest_path);
+    fs::create_dir_all(dest)
+      .map_err(|err| Error::new(Status::GenericFailure, format!("mkdir: {err}")))?;
+    // `max_dict_size`: None (unset) keeps the WinRAR-style 4 GiB default
+    // cap; Some(0) means unlimited; other values raise/lower the cap.
+    let max_dict_size = match self.opts.max_dict_size {
+      None => Some(4 * 1024 * 1024 * 1024),
+      Some(0) => None,
+      Some(v) => Some(v as u64),
+    };
+    archive
+      .extract_all_with_options(
+        dest,
+        rar5::ExtractOptions {
+          flat_paths: self.opts.flat.unwrap_or(false),
+          max_unpacked_bytes: None,
+          max_total_unpacked_bytes: None,
+          max_dict_size,
+          ..Default::default()
+        },
+      )
+      .map_err(to_napi_error)?;
+    Ok(())
+  }
+
+  fn resolve(&mut self, _env: Env, _output: Self::Output) -> Result<Self::JsValue> {
+    Ok(())
+  }
+}
+
+/// Extract a RAR5 archive into a directory (fully streaming: no per-member
+/// or total size limits, so arbitrarily large members work).
+#[napi]
+pub fn extract_archive(
+  archive_path: String,
+  opts: ExtractArchiveOptions,
+  signal: Option<AbortSignal>,
+) -> AsyncTask<ExtractArchiveTask> {
+  AsyncTask::with_optional_signal(
+    ExtractArchiveTask {
+      archive_path,
+      opts,
     },
     signal,
   )

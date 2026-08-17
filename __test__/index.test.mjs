@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { createReadStream } from 'node:fs'
 import {
   mkdtempSync,
+  readFileSync,
   writeFileSync,
   rmSync,
   readdirSync,
@@ -315,6 +316,108 @@ test('appendEntries keeps existing members and listEntries/deleteEntries work', 
     assert.deepEqual(names, ['dir/b.txt'])
 
     assert.throws(() => listEntries(join(dir, 'missing.rar')), /repair|open|read|rar5/i)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('extractArchive restores members byte-identically (incl. flat and password)', async () => {
+  const dir = tempDir()
+  try {
+    const payload = Buffer.from('extract me please '.repeat(500))
+    const out = join(dir, 'x.rar')
+    await createArchive({
+      outPath: out,
+      password: 'pw',
+      entries: [{ kind: 'bytes', name: 'sub/data.txt', data: payload }],
+    })
+
+    const { extractArchive } = await import('../index.js')
+    // Wrong password fails.
+    await assert.rejects(
+      extractArchive(out, { destPath: join(dir, 'bad'), password: 'nope' }),
+      /password|decrypt|rar5/i,
+    )
+    // Correct password restores the tree.
+    const dest = join(dir, 'out')
+    await extractArchive(out, { destPath: dest, password: 'pw' })
+    assert.deepEqual(readFileSync(join(dest, 'sub', 'data.txt')), payload)
+    // Flat extraction lands under the basename.
+    const flatDest = join(dir, 'flat')
+    await extractArchive(out, { destPath: flatDest, password: 'pw', flat: true })
+    assert.deepEqual(readFileSync(join(flatDest, 'data.txt')), payload)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('listEntriesDetailed reports sizes and methods', async () => {
+  const dir = tempDir()
+  try {
+    const out = join(dir, 'd.rar')
+    await createArchive({
+      outPath: out,
+      entries: [
+        { kind: 'bytes', name: 'a.txt', data: Buffer.from('hello '.repeat(500)) },
+        { kind: 'bytes', name: 'b.bin', data: Buffer.alloc(4096, 7) },
+      ],
+    })
+    const { listEntriesDetailed } = await import('../index.js')
+    const entries = listEntriesDetailed(out)
+    assert.equal(entries.length, 2)
+    const a = entries.find((e) => e.name === 'a.txt')
+    assert.equal(a.size, 3000)
+    assert.ok(a.packedSize < a.size, `a.txt should compress (${a.packedSize})`)
+    assert.equal(a.method, 3)
+    const b = entries.find((e) => e.name === 'b.bin')
+    assert.equal(b.size, 4096)
+    assert.ok(b.packedSize < 4096, 'repeated bytes must compress')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('dictSize accepts powers of two up to 4 GiB and rejects invalid values', async () => {
+  const dir = tempDir()
+  try {
+    const out = join(dir, 'd.rar')
+    await createArchive({
+      outPath: out,
+      dictSize: '64m',
+      entries: [{ kind: 'bytes', name: 'a.txt', data: Buffer.from('data') }],
+    })
+    const { listEntriesDetailed } = await import('../index.js')
+    const entries = listEntriesDetailed(out)
+    assert.equal(entries.length, 1)
+
+    // Values above 4 GiB are accepted (RAR7 path); for a small file the
+    // 2x-file-size cap falls back to RAR5, so it still creates fine.
+    const big = join(dir, 'big.rar')
+    await createArchive({
+      outPath: big,
+      dictSize: '8g',
+      entries: [{ kind: 'bytes', name: 'a.txt', data: Buffer.from('data') }],
+    })
+    assert.equal(listEntriesDetailed(big).length, 1)
+
+    // Non-power-of-two values up to 4 GiB are rejected.
+    await assert.rejects(
+      createArchive({
+        outPath: join(dir, 'bad.rar'),
+        dictSize: '3m',
+        entries: [{ kind: 'bytes', name: 'a.txt', data: Buffer.from('data') }],
+      }),
+      /powers of two|dictionary/,
+    )
+    // Garbage is rejected.
+    await assert.rejects(
+      createArchive({
+        outPath: join(dir, 'bad2.rar'),
+        dictSize: 'banana',
+        entries: [{ kind: 'bytes', name: 'a.txt', data: Buffer.from('data') }],
+      }),
+      /invalid dictionary size/,
+    )
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

@@ -11,6 +11,11 @@ export interface AppendArchiveOptions {
    * encrypted so the solid chain can be extended).
    */
   password?: string
+  /**
+   * Dictionary size for the added members (like `-md`; see
+   * [`CreateArchiveOptions::dict_size`]).
+   */
+  dictSize?: string
 }
 
 /**
@@ -55,6 +60,33 @@ export interface CreateArchiveOptions {
   volumeSize?: number
   /** Reject the operation when the summed input size exceeds this. */
   maxTotalBytes?: number
+  /**
+   * Dictionary size (like WinRAR `-md<size>[k|m|g]`, no unit = MiB).
+   * Values up to 4 GiB must be powers of two (128 KiB .. 4 GiB); values
+   * above 4 GiB are accepted as-is and produce RAR7 (v70) archives.
+   */
+  dictSize?: string
+  /** Create a solid archive (better ratio, slower random access). */
+  solid?: boolean
+  /** Add a quick-open record for fast member listing. */
+  quickOpen?: boolean
+  /** Write BLAKE2sp hash records for every member (like WinRAR `-htb`). */
+  blake2?: boolean
+  /** Compression threads (1..=64). */
+  threads?: number
+  /**
+   * Save the creation time (Windows) / ctime (Unix) in the FILE_TIME
+   * extra record (like WinRAR `-tsc`).
+   */
+  saveCtime?: boolean
+  /** Save the last access time (like WinRAR `-tsa`). */
+  saveAtime?: boolean
+  /** Store timestamps at 1-second precision (like WinRAR `-ts...1`). */
+  timePrecisionSeconds?: boolean
+  /** Save the owner and group (numeric ids) on Unix (like WinRAR `-ow`). */
+  saveOwner?: boolean
+  /** Save NTFS alternate data streams (like WinRAR `-os`; Windows only). */
+  saveStreams?: boolean
 }
 
 export interface CreateResult {
@@ -76,6 +108,20 @@ export interface CreateResult {
  */
 export declare function deleteEntries(archivePath: string, names: Array<string>, password?: string | undefined | null): number
 
+/** One member's details for [`list_entries_detailed`]. */
+export interface EntryInfo {
+  name: string
+  /** Uncompressed size in bytes (JS number; exact up to 2^53). */
+  size: number
+  /** On-disk (packed) size in bytes. */
+  packedSize: number
+  /** Compression method: 0 = store, 1..=5 (level). */
+  method: number
+  isDir: boolean
+  /** Modification time as Unix seconds (0 when unknown). */
+  mtime: number
+}
+
 export interface EntryInput {
   /** "file" | "dir" | "bytes" */
   kind: string
@@ -90,8 +136,33 @@ export interface EntryInput {
   data?: Buffer
 }
 
+/**
+ * Extract a RAR5 archive into a directory (fully streaming: no per-member
+ * or total size limits, so arbitrarily large members work).
+ */
+export declare function extractArchive(archivePath: string, opts: ExtractArchiveOptions, signal?: AbortSignal | undefined | null): Promise<unknown>
+
+/** Options for [`extract_archive`]. */
+export interface ExtractArchiveOptions {
+  /** Destination directory (created when missing). */
+  destPath: string
+  /** Password for encrypted archives. */
+  password?: string
+  /** Extract members flat (basename only, no directory tree). */
+  flat?: boolean
+  /**
+   * Maximum dictionary size in bytes accepted when decoding a member.
+   * WinRAR-compatible default: 4 GiB (RAR7 v70 members with larger
+   * dictionaries are refused). Pass 0 for no limit.
+   */
+  maxDictSize?: number
+}
+
 /** List the member names of a RAR5 archive. */
 export declare function listEntries(archivePath: string, password?: string | undefined | null): Array<string>
+
+/** List the members of a RAR5 archive with sizes and methods. */
+export declare function listEntriesDetailed(archivePath: string, password?: string | undefined | null): Array<EntryInfo>
 
 export interface ProgressData {
   done: number

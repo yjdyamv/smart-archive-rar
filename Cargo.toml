@@ -11,7 +11,9 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = "3"
 napi-derive = "3"
-rar5 = { git = "https://codeberg.org/yjdyamv/rar-rs.git", rev = "d8f0f63", features = ["parallel", "simd"] }
+# Development: local checkout. Before release, point back at the pushed
+# revision on codeberg (see the previous `rev = "d8f0f63"` form).
+rar5 = { path = "C:/Users/yuan/Desktop/rar-rs", features = ["parallel", "simd"] }
 
 [build-dependencies]
 napi-build = "2"
