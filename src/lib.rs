@@ -695,7 +695,7 @@ pub struct ExtractArchiveOptions {
   pub max_dict_size: Option<i64>,
 }
 
-struct ExtractArchiveTask {
+pub struct ExtractArchiveTask {
   archive_path: String,
   opts: ExtractArchiveOptions,
 }

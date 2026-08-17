@@ -143,6 +143,19 @@ function mapListArgs(archivePath, password, platform = process.platform) {
   ]
 }
 
+function mapExtractArgs(archivePath, options, platform = process.platform) {
+  const mapped = { ...options }
+  if (typeof mapped.destPath === 'string') {
+    mapped.destPath = toGuestPath(mapped.destPath, platform)
+  }
+  return [
+    typeof archivePath === 'string'
+      ? toGuestPath(archivePath, platform)
+      : archivePath,
+    mapped,
+  ]
+}
+
 module.exports = {
   toGuestPath,
   toHostPath,
@@ -153,4 +166,5 @@ module.exports = {
   mapAppendOptions,
   mapDeleteArgs,
   mapListArgs,
+  mapExtractArgs,
 }

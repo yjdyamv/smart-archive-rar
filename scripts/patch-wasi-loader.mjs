@@ -29,6 +29,8 @@ const LOADER_EXPORT_LINES = [
   'module.exports.deleteEntries = __napiModule.exports.deleteEntries',
   'module.exports.listEntries = __napiModule.exports.listEntries',
   'module.exports.repairArchive = __napiModule.exports.repairArchive',
+  'module.exports.extractArchive = __napiModule.exports.extractArchive',
+  'module.exports.listEntriesDetailed = __napiModule.exports.listEntriesDetailed',
 ]
 const LOADER_EXPORTS_CREATE_NEW = `const __wasiCreateArchive = __napiModule.exports.createArchive
 module.exports.createArchive = function __wasiCreateArchiveWrapper(
@@ -82,6 +84,26 @@ module.exports.repairArchive = function __wasiRepairArchiveWrapper(
     ...__wasiPathMap.mapRepairArgs(inputPath, outputPath),
   )
 }`
+const LOADER_EXPORTS_EXTRACT_NEW = `const __wasiExtractArchive = __napiModule.exports.extractArchive
+module.exports.extractArchive = function __wasiExtractArchiveWrapper(
+  archivePath,
+  opts,
+  signal,
+) {
+  return __wasiExtractArchive(
+    ...__wasiPathMap.mapExtractArgs(archivePath, opts),
+    signal,
+  )
+}`
+const LOADER_EXPORTS_LIST_DETAILED_NEW = `const __wasiListEntriesDetailed = __napiModule.exports.listEntriesDetailed
+module.exports.listEntriesDetailed = function __wasiListEntriesDetailedWrapper(
+  archivePath,
+  password,
+) {
+  return __wasiListEntriesDetailed(
+    ...__wasiPathMap.mapListArgs(archivePath, password),
+  )
+}`
 
 const WORKER_PREOPEN_OLD = `      preopens: {
         [__rootDir]: __rootDir,
@@ -114,6 +136,11 @@ function patchLoader(source) {
   source = source.replace(LOADER_EXPORT_LINES[2], LOADER_EXPORTS_DELETE_NEW)
   source = source.replace(LOADER_EXPORT_LINES[3], LOADER_EXPORTS_LIST_NEW)
   source = source.replace(LOADER_EXPORT_LINES[4], LOADER_EXPORTS_REPAIR_NEW)
+  source = source.replace(LOADER_EXPORT_LINES[5], LOADER_EXPORTS_EXTRACT_NEW)
+  source = source.replace(
+    LOADER_EXPORT_LINES[6],
+    LOADER_EXPORTS_LIST_DETAILED_NEW,
+  )
   return source
 }
 
