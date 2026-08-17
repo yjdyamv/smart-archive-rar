@@ -389,7 +389,7 @@ impl Task for CreateArchiveTask {
     }
 
     if let Some(threads) = self.opts.threads {
-      let threads = threads.max(1).min(64) as usize;
+      let threads = threads.clamp(1, 64) as usize;
       rar5::set_compression_threads(threads);
       rar5::set_extraction_threads(threads);
     }
