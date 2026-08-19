@@ -7,7 +7,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use napi::bindgen_prelude::*;
@@ -304,23 +303,14 @@ fn write_batch(
   let terminal = progress.map(Arc::new);
   if let Some(tsfn) = terminal.as_ref() {
     let cb_tsfn = tsfn.clone();
-    let emitted = Arc::new(AtomicU64::new(0));
-    let emit = emitted.clone();
-    let last_done = Arc::new(AtomicU64::new(0));
-    let last = last_done.clone();
-    archive.set_progress_callback(Some(Box::new(move |done, _file_total| {
-      if done == 0 {
-        // rar-rs starts every member with a (0, file_total) event; reset
-        // the per-file baseline so only the delta is accumulated.
-        last.store(0, Ordering::Relaxed);
-      }
-      let prev = last.swap(done, Ordering::Relaxed);
-      let delta = done.saturating_sub(prev);
-      let overall = emit.fetch_add(delta, Ordering::Relaxed) + delta;
+    // rar-rs already aggregates every member's deltas (sequential and
+    // parallel-wave alike) into one monotonic, operation-global stream, so
+    // this side just forwards `(committed, total)`.
+    archive.set_progress_callback(Some(Box::new(move |done, total| {
       let _ = cb_tsfn.call(
         Ok(ProgressData {
-          done: overall.min(total_bytes) as f64,
-          total: total_bytes as f64,
+          done: done.min(total) as f64,
+          total: total as f64,
         }),
         ThreadsafeFunctionCallMode::NonBlocking,
       );
